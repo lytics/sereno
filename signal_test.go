@@ -22,7 +22,7 @@ func TestSignal(t *testing.T) {
 	testtimeout := NewTestCaseTimeout(t, 10*time.Second, time.Microsecond)
 	defer testtimeout.End()
 
-	const msgcount = 100
+	const msgcount = 9
 
 	ready1barrier := &sync.WaitGroup{}
 	ready1barrier.Add(1)
