@@ -11,7 +11,7 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 
 ### Sereno's Recipes:
 
-##### Distributed Counters :
+#### Distributed Counters :
 
 ```
  	#On server 1
@@ -32,7 +32,7 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 	err := cntr.Inc(1)
 ```
 
-##### Distributed WaitGroup :
+#### Distributed WaitGroup :
 
 A distributed version of golang's WaitGroup.  
 
@@ -61,7 +61,7 @@ Example:
 	dwg.Done()
 ```
 
-##### Topic Based PubSub :
+#### Topic Based PubSub :
 
 This is a topic based pub/sub message bus using etcd.  This solution isn't going to be good for high volume message (see [Kafka8+sarama](https://github.com/Shopify/sarama), [gnatsd](https://github.com/nats-io/gnatsd),etc if you need high throughput message loads).  From my testing this does fine upto about 200 msgs/second.  
 
@@ -110,7 +110,7 @@ So with that caveat why use it? Convenience!   If your already uses this library
 ```
 
 
-##### Node keep alive :
+#### Node keep alive :
 
 This struct is useful to announcing that this node is still alive.  A common use of this pattern is to refresh an etcd node's ttl every so often (i.e. 30 seconds), so that a collection of actors can be detect when other actors enter or leave the topology.    
 
@@ -128,7 +128,7 @@ func main(){
 }
 ```
 
-##### Convenience wrapper for Time Sortable UUIDs (via SonyFlake).  
+#### Convenience wrapper for Time Sortable UUIDs (via SonyFlake).  
 
 ```
 	msgid, err := sereno.NextId()
