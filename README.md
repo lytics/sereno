@@ -1,5 +1,8 @@
 
 
+[![Build Status](https://travis-ci.org/lytics/sereno.svg?branch=master)](https://travis-ci.org/lytics/sereno)
+[![GoDoc](https://godoc.org/github.com/lytics/sereno?status.svg)](https://godoc.org/github.com/lytics/sereno)
+
 ### Why Sereno?
 
 sereno means night watchman in Spanish and since this project is inspired by the curator library for zookeeper, it seemed like a good choice. 
