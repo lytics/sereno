@@ -13,8 +13,8 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 
 #### Distributed Counters :
 
-```
- 	#On server 1
+**On server 1**
+```golang
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	cntr, err := sereno.NewCounter(context.Background(), "counter001", kapi)
 	if err != nil {
@@ -22,8 +22,9 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 	}
 	err := cntr.Inc(1)
 ```
-```
-    #On server 2
+
+**On server 2**
+```golang
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	cntr, err := sereno.NewCounter(context.Background(), "counter001", kapi)
 	if err != nil {
@@ -38,9 +39,10 @@ A distributed version of golang's WaitGroup.
 
 Example:
 
-```
-    #Parent
- 	# i.e. waiting for workers to finish.
+
+**Parent**
+**  i.e. waiting for workers to finish.**
+```golang
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	dwg, err := sereno.NewWaitGroup(context.Background(), "workgroup0001", kapi)
 	if err != nil {
@@ -49,9 +51,9 @@ Example:
 	dwg.Add(5)
 	dwg.Wait()
 ```
-``` 
-    #Child
-    # i.e. the ones doing the work that the "parent".
+**Child**
+**  i.e. the ones doing the work that the "parent".**
+```golang
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	dwg, err := sereno.NewWaitGroup(context.Background(), "workgroup0001", kapi)
 	if err != nil {
@@ -86,7 +88,7 @@ So with that caveat why use it? Convenience!   If your already uses this library
 
 **Subscriber:**
 
-```
+```golang
     sub, err := sereno.NewPubSubTopic(context.Background(), "topic42", kapi)
 	if err != nil {
 		log.Fatalf("error:", err)
@@ -116,7 +118,7 @@ This struct is useful to announcing that this node is still alive.  A common use
 
 This will eventually be a building block for a Leader Election Recipe. 
 
-```
+```golang
 func main(){
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	keepalive, err := sereno.NewNodeKeepAlive(context.Background(), "service/api/node0001", 30*time.Second, kapi)
@@ -130,7 +132,7 @@ func main(){
 
 #### Convenience wrapper for Time Sortable UUIDs (via SonyFlake).  
 
-```
+```golang
 	msgid, err := sereno.NextId()
 	if err != nil {
 		log.Fatalf("error:", err)
