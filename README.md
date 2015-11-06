@@ -1,5 +1,4 @@
 
-
 [![Build Status](https://travis-ci.org/lytics/sereno.svg?branch=master)](https://travis-ci.org/lytics/sereno)
 [![GoDoc](https://godoc.org/github.com/lytics/sereno?status.svg)](https://godoc.org/github.com/lytics/sereno)
 
