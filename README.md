@@ -42,8 +42,8 @@ A distributed version of golang's WaitGroup.
 
 Example:
 
-
 **Parent**
+
 **  i.e. waiting for workers to finish.**
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
@@ -54,7 +54,9 @@ Example:
 	dwg.Add(5)
 	dwg.Wait()
 ```
+
 **Child**
+
 **  i.e. the ones doing the work that the "parent".**
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
