@@ -1,5 +1,5 @@
 language: go
-script: go test -race -cpu 1,4 -v -timeout 5m ./... 2>&1 | grep -v etcdserver: | grep -v raft:
+script:  ./scripts/run-tests.sh
 sudo: false
 go:
   - 1.3.3
