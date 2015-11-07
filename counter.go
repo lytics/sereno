@@ -25,7 +25,7 @@ func NewDistributedCounter(ctx context.Context, keyid string, ttl time.Duration,
 		return nil, err
 	}
 
-	return &DistributedCounter{ctx: ctx, keyid: keyid, kapi: kapi, ttl: ttl}, nil
+	return &DistributedCounter{ctx: ctx, keyid: keyid, kapi: kapi, ttl: ttl, stop: make(chan bool)}, nil
 }
 
 type DistributedCounter struct {
@@ -33,6 +33,8 @@ type DistributedCounter struct {
 	kapi  etcdc.KeysAPI
 	ttl   time.Duration
 	ctx   context.Context
+
+	stop chan bool
 }
 
 func (c *DistributedCounter) Set(val int) error {
@@ -56,7 +58,7 @@ func (c *DistributedCounter) Inc(n int) error {
 		return strconv.Itoa(n), nil
 	}
 
-	return CompareAndSwapUntil(c.ctx, tries, c.keyid, c.kapi, evaluator)
+	return CompareAndSwapUntil(context.Background(), tries, c.keyid, c.kapi, evaluator)
 }
 
 func (c *DistributedCounter) Dec(n int) error {
@@ -74,7 +76,7 @@ func (c *DistributedCounter) Dec(n int) error {
 		return strconv.Itoa(n), nil
 	}
 
-	return CompareAndSwapUntil(c.ctx, tries, c.keyid, c.kapi, evaluator)
+	return CompareAndSwapUntil(context.Background(), tries, c.keyid, c.kapi, evaluator)
 }
 
 func (c *DistributedCounter) Val() (int, error) {
@@ -94,9 +96,14 @@ type CounterUpdate struct {
 	Err error
 }
 
+func (c *DistributedCounter) UnWatch() {
+	close(c.stop)
+}
+
 func (c *DistributedCounter) Watch() (<-chan *CounterUpdate, error) {
 	out := make(chan *CounterUpdate)
 	k := c.kapi
+	c.stop = make(chan bool)
 
 	go func() {
 		defer close(out)
@@ -107,19 +114,32 @@ func (c *DistributedCounter) Watch() (<-chan *CounterUpdate, error) {
 			return
 		}
 
+		errcnt := 0
 		w := k.Watcher(c.keyid, &etcdc.WatcherOptions{AfterIndex: resp.Index, Recursive: false})
 		for {
-			res, err := w.Next(c.ctx)
+			select {
+			case <-c.stop:
+				return
+			default:
+			}
+			ctx, can := context.WithTimeout(context.Background(), 2*time.Second)
+			res, err := w.Next(ctx)
+			can()
+
 			if err != nil {
 				if err == context.Canceled {
 					out <- &CounterUpdate{Err: err}
 					return
 				} else if err == context.DeadlineExceeded {
-					out <- &CounterUpdate{Err: err}
-					return
+					continue
 				} else if cerr, ok := err.(*etcdc.ClusterError); ok {
-					out <- &CounterUpdate{Err: cerr}
-					return
+					errcnt++
+					if errcnt == 128 {
+						out <- &CounterUpdate{Err: cerr}
+						return
+					}
+					backoff(errcnt)
+					continue
 				} else {
 					out <- &CounterUpdate{Err: err}
 					return

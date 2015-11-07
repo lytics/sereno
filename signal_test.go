@@ -2,6 +2,7 @@ package sereno_test
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 )
 
 func TestSignal(t *testing.T) {
+	runtime.GOMAXPROCS(8)
 	cluster := embeddedetcd.TestClusterOf1()
 	cluster.Launch()
 	defer func() {
@@ -19,10 +21,10 @@ func TestSignal(t *testing.T) {
 		cluster.Terminate(wipe_data_onterm)
 	}()
 
-	testtimeout := NewTestCaseTimeout(t, 10*time.Second, time.Microsecond)
+	testtimeout := NewTestCaseTimeout(t, 60*time.Second, time.Microsecond)
 	defer testtimeout.End()
 
-	const msgcount = 9
+	const msgcount = 1500
 
 	ready1barrier := &sync.WaitGroup{}
 	ready1barrier.Add(1)
@@ -44,6 +46,7 @@ func TestSignal(t *testing.T) {
 		AssertT(t, err == nil, "err should be nil, got:%v", err)
 		subchan, err := sub.Subscribe()
 		AssertT(t, err == nil, "err should be nil, got:%v", err)
+		defer sub.UnSubscribe()
 
 		ready1barrier.Done()
 
@@ -64,9 +67,9 @@ func TestSignal(t *testing.T) {
 				}
 				t.Fatalf("error: %v", msgout.Err)
 			}
-			//t.Logf("msg: %v", string(msgout.Msg))
+
 			cnt++
-			if cnt == msgcount {
+			if cnt == msgcount-1 {
 				return
 			}
 		}

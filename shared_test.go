@@ -71,8 +71,8 @@ func NewTestCaseTimeout(t *testing.T, timeout, delay time.Duration) *TestcaseTim
 		time.Sleep(delay)
 		select {
 		case <-time.After(timeout):
-			fmt.Println("testcase timed out")
-			t.Fatalf("testcase timed out: callstack : %v", callstack)
+			fmt.Printf("testcase timed out: callstack : %v\n", callstack)
+			panic("timeout")
 		case <-done:
 		}
 	}()

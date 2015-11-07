@@ -49,8 +49,14 @@ func init() {
 	log.SetFlags(log.Ltime | log.Lmicroseconds | log.Lshortfile)
 }
 
-func TestClusterOf1()*EtcdCluster { return NewCluster( 1, false) }
-func TestClusterOf3()*EtcdCluster { return NewCluster( 3, false) }
+func TestClusterOf1()*EtcdCluster { 
+	c := NewCluster( 1, false) 
+	return c
+}
+func TestClusterOf3()*EtcdCluster { 
+	c := NewCluster( 3, false) 
+	return c 
+}
 
 type EtcdCluster struct {
 	Members []*member

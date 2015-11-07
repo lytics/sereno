@@ -41,7 +41,14 @@ func NewPubSubTopicByKey(ctx context.Context, keyid string, ttl time.Duration, k
 		return nil, err
 	}
 
-	return &EtcdPubSubTopic{ctx: ctx, keyid: keyid, kapi: kapi, ttl: ttl, keepalive: keepalive}, nil
+	return &EtcdPubSubTopic{
+		ctx:       ctx,
+		keyid:     keyid,
+		kapi:      kapi,
+		ttl:       ttl,
+		keepalive: keepalive,
+		stop:      make(chan bool),
+	}, nil
 }
 
 type EtcdPubSubTopic struct {
@@ -50,6 +57,8 @@ type EtcdPubSubTopic struct {
 	ctx       context.Context
 	ttl       time.Duration
 	keepalive *NodeKeepAlive
+
+	stop chan bool
 }
 
 func (t *EtcdPubSubTopic) Publish(msg []byte) error {
@@ -64,9 +73,15 @@ func (t *EtcdPubSubTopic) Publish(msg []byte) error {
 	return err
 }
 
+func (t *EtcdPubSubTopic) UnSubscribe() {
+	close(t.stop)
+}
+
 func (t *EtcdPubSubTopic) Subscribe() (<-chan *TopicMsg, error) {
 	out := make(chan *TopicMsg, 3)
 	k := t.kapi
+	t.stop = make(chan bool)
+
 	go func() {
 		defer close(out)
 
@@ -78,30 +93,42 @@ func (t *EtcdPubSubTopic) Subscribe() (<-chan *TopicMsg, error) {
 
 		//TODO -- to drain or not to drain the backlog (current msgs) in the queue?
 		//        for now we'll only send new msgs.
-
+		errcnt := 0
 		w := k.Watcher(t.keyid, &etcdc.WatcherOptions{AfterIndex: resp.Index, Recursive: true})
 		for {
-			res, err := w.Next(t.ctx)
+
+			select {
+			case <-t.stop:
+				return
+			default:
+			}
+			ctx, can := context.WithTimeout(context.Background(), 2*time.Second)
+			res, err := w.Next(ctx)
+			can()
+
 			if err != nil {
 				if err == context.Canceled {
 					out <- &TopicMsg{Err: err}
 					return
 				} else if err == context.DeadlineExceeded {
-					out <- &TopicMsg{Err: err}
-					return
+					continue
 				} else if cerr, ok := err.(*etcdc.ClusterError); ok {
-					out <- &TopicMsg{Err: cerr}
-					return
+					errcnt++
+					if errcnt == 128 {
+						out <- &TopicMsg{Err: cerr}
+						return
+					}
+					backoff(errcnt)
+					continue
 				} else {
 					out <- &TopicMsg{Err: err}
 					return
 				}
 			}
+			errcnt = 0
 
 			if res.Action == etcdstore.Create {
 				out <- &TopicMsg{Msg: []byte(res.Node.Value)}
-			} else {
-				fmt.Println("what is: ", res)
 			}
 		}
 	}()

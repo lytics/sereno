@@ -113,10 +113,10 @@ func TestCounterWatch(t *testing.T) {
 	cluster.Launch()
 	defer cluster.Terminate(wipe_data_onterm)
 
-	const wrkers = 3
-	const wrkersInc = 200
+	const wrkers = 2
+	const wrkersInc = 500
 
-	done := make(chan bool)
+	done := make(chan bool, wrkers+10)
 	startbarrier := &sync.WaitGroup{}
 	startbarrier.Add(1)
 

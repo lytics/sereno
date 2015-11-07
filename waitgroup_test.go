@@ -60,7 +60,7 @@ func TestWorkGroupTest(t *testing.T) {
 		select {
 		case <-time.After(10 * time.Second):
 			c, err := sereno.WgCount(dwg)
-			AssertT(t, err == nil, "etestcase timed out: err should be nil, got:%v", err)
+			AssertT(t, err == nil, "testcase timed out: err should be nil, got:%v", err)
 			t.Fatalf("testcase timed out: waiting on: %v", c)
 		case <-done:
 			t.Log("nothing to see here, all done...")

@@ -14,7 +14,9 @@ var CASErrorOutOfRetries error = fmt.Errorf("error trying to do a compare and sw
 
 var DefaultTTL time.Duration = 24 * time.Hour
 
-var dice *rand.Rand = rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+func dice() *rand.Rand {
+	return rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+}
 
 func CompareAndSwapUntil(ctx context.Context, tries int, keyid string, kapi etcdc.KeysAPI,
 	evaluator func(res *etcdc.Response, setOpts *etcdc.SetOptions) (val string, err error),
@@ -80,7 +82,7 @@ func backoff(try int) {
 	nf := math.Pow(4, float64(try))
 	nf = math.Max(1000, nf)
 	nf = math.Min(nf, 2000000)
-	r := dice.Int31n(int32(nf))
+	r := dice().Int31n(int32(nf))
 	d := time.Duration(r) * time.Microsecond
 	time.Sleep(d)
 }
