@@ -41,7 +41,7 @@ WORK IN PROGRESS...
 
 ###### Distributed Counters :
 ---------------------------------------------------------------------------
-***On server 1***
+*On server 1*
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	cntr, err := sereno.NewCounter(context.Background(), "counter001", kapi)
@@ -51,7 +51,7 @@ WORK IN PROGRESS...
 	err := cntr.Inc(1)
 ```
 
-***On server 2***
+*On server 2*
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	cntr, err := sereno.NewCounter(context.Background(), "counter001", kapi)
@@ -68,7 +68,7 @@ A distributed version of golang's WaitGroup.
 
 Example:
 
-***Parent***
+*Parent*
 
 i.e. waiting for workers to finish.
 ```go
@@ -81,7 +81,7 @@ i.e. waiting for workers to finish.
 	dwg.Wait()
 ```
 
-***Child***
+*Child*
 
 i.e. the ones doing the work that the "parent".
 ```go
@@ -103,7 +103,7 @@ So with that caveat why use it? Convenience!   If your already uses this library
 
 ####### Example:
 
-***Publisher:***
+*Publisher:*
 
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
@@ -118,7 +118,7 @@ So with that caveat why use it? Convenience!   If your already uses this library
 
 ```
 
-***Subscriber:***
+*Subscriber:*
 
 ```go
     sub, err := sereno.NewPubSubTopic(context.Background(), "topic42", kapi)
