@@ -2,16 +2,40 @@
 [![Build Status](https://travis-ci.org/lytics/sereno.svg?branch=master)](https://travis-ci.org/lytics/sereno)
 [![GoDoc](https://godoc.org/github.com/lytics/sereno?status.svg)](https://godoc.org/github.com/lytics/sereno)
 
-### Why Sereno?
+## Why Sereno?
 
 sereno means night watchman in Spanish and since this project is inspired by the curator library for zookeeper, it seemed like a good choice. 
 
-### Inspiration:
+## Inspiration:
 
 Inspired by the recipes in the curator library.  http://curator.apache.org/curator-recipes/index.html
 
 
-### Sereno's Recipes:
+## Sereno's Recipes:
+
+#### Leader Election :
+
+```go
+	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
+	leadership, err := sereno.NewLeaderElection(context.Background(), "leader-topology1", kapi)
+	if err != nil {
+		log.Fatalf("error:", err)
+	}
+	leadership.OnElectedLeader(func(t sereno.Topology){
+		//Do leader stuff
+	})
+	leadership.OnElectedFollower(func(t sereno.Topology){
+		//Do follower stuff
+	})
+	//[Optional]
+	leadership.OnPeerJoin(func(t sereno.Topology){
+		//Do follower stuff
+	})
+	//[Optional]
+	leadership.OnPeerLeave(func(t sereno.Topology){
+		//Do follower stuff
+	})
+```
 
 #### Distributed Counters :
 
@@ -43,7 +67,7 @@ Example:
 
 **Parent**
 
-**  i.e. waiting for workers to finish.**
+**i.e. waiting for workers to finish.**
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	dwg, err := sereno.NewWaitGroup(context.Background(), "workgroup0001", kapi)
@@ -56,7 +80,7 @@ Example:
 
 **Child**
 
-**  i.e. the ones doing the work that the "parent".**
+**i.e. the ones doing the work that the "parent".**
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	dwg, err := sereno.NewWaitGroup(context.Background(), "workgroup0001", kapi)

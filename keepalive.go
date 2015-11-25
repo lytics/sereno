@@ -12,18 +12,22 @@ func NewNodeKeepAlive(ctx context.Context, nodeid string, nodettl time.Duration,
 	done := make(chan bool)
 	go func() {
 		refreshtime := TTLRefreshDur(nodettl)
+		Log("started a node keepalive for: %v refresh-time %v", nodeid, refreshtime)
 		for {
 			select {
 			case <-time.After(refreshtime):
 				const tries = 1024
 				evaluator := func(res *etcdc.Response, setOpts *etcdc.SetOptions) (val string, err error) {
 					setOpts.TTL = nodettl // update the ttl
+					Trace("triggering a node ttl refresh for: %v", nodeid)
 					return res.Node.Value, nil
 				}
 				CompareAndSwapUntil(ctx, tries, nodeid, kapi, evaluator)
 			case <-done:
+				Log("aborted: %v", nodeid)
 				return
 			case <-ctx.Done():
+				Log("context done: %v", nodeid)
 				return
 			}
 		}

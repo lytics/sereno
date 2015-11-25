@@ -29,7 +29,7 @@ func NewPubSubTopicByKey(ctx context.Context, keyid string, ttl time.Duration, k
 	if IsKeyNotFound(err) {
 		opt := &etcdc.SetOptions{PrevExist: etcdc.PrevNoExist, TTL: ttl, Dir: true}
 		_, err = kapi.Set(ctx, keyid, "", opt)
-		if err != nil && !IsCompareAndSwapFailure(err) {
+		if err != nil && !IsCompareAndSwapFailure(err) && !IsNodeExists(err) {
 			return nil, err
 		}
 	} else if err != nil {
@@ -40,6 +40,8 @@ func NewPubSubTopicByKey(ctx context.Context, keyid string, ttl time.Duration, k
 	if err != nil {
 		return nil, err
 	}
+
+	Log("signal: new signal(pub/sub) for %v, ttl:%v", keyid, ttl)
 
 	return &EtcdPubSubTopic{
 		ctx:       ctx,
@@ -82,53 +84,72 @@ func (t *EtcdPubSubTopic) Subscribe() (<-chan *TopicMsg, error) {
 	k := t.kapi
 	t.stop = make(chan bool)
 
+	Log("new subscriber for %v", t.keyid)
+
 	go func() {
 		defer close(out)
 
 		resp, err := k.Get(t.ctx, t.keyid, &etcdc.GetOptions{Quorum: true})
 		if err != nil {
+			Log("%v get before watch err %v", t.keyid, err)
 			out <- &TopicMsg{Err: fmt.Errorf("pubsubtopic: get key watch error:", err)}
 			return
 		}
 
 		//TODO -- to drain or not to drain the backlog (current msgs) in the queue?
 		//        for now we'll only send new msgs.
-		errcnt := 0
+
+		try := 0
 		w := k.Watcher(t.keyid, &etcdc.WatcherOptions{AfterIndex: resp.Index, Recursive: true})
 		for {
 
 			select {
 			case <-t.stop:
+				Log("%v watch aborted.", t.keyid)
 				return
 			default:
 			}
-			ctx, can := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, can := context.WithTimeout(context.Background(), 10*time.Second)
 			res, err := w.Next(ctx)
 			can()
 
 			if err != nil {
 				if err == context.Canceled {
+					Trace("%v watch context canceled err %v.  surfacing.", t.keyid, err)
 					out <- &TopicMsg{Err: err}
 					return
 				} else if err == context.DeadlineExceeded {
 					continue
 				} else if cerr, ok := err.(*etcdc.ClusterError); ok {
-					errcnt++
-					if errcnt == 128 {
-						out <- &TopicMsg{Err: cerr}
-						return
+					if len(cerr.Errors) > 0 && cerr.Errors[0] == context.DeadlineExceeded {
+						continue
 					}
-					backoff(errcnt)
+					Trace("%v watch cluster err %v.  retrying.", t.keyid, cerr.Detail())
+					continue
+				} else if err.Error() == etcdc.ErrClusterUnavailable.Error() {
+					Trace("%v watch ErrClusterUnavailable err %v.  retrying.", t.keyid, err)
+					try++
+					backoff(try + 1000)
 					continue
 				} else {
+					Log("%v watch err %v : surfacing.", t.keyid, err)
 					out <- &TopicMsg{Err: err}
 					return
 				}
+			} else if res == nil {
+				continue
 			}
-			errcnt = 0
+
+			try = 0
 
 			if res.Action == etcdstore.Create {
-				out <- &TopicMsg{Msg: []byte(res.Node.Value)}
+				m := []byte(res.Node.Value)
+				if len(m) < 512 {
+					Trace("%v new msg:[%v]", t.keyid, string(m))
+				} else {
+					Trace("%v new msg:...", t.keyid)
+				}
+				out <- &TopicMsg{Msg: m}
 			}
 		}
 	}()

@@ -70,7 +70,7 @@ func TestSignal(t *testing.T) {
 
 			cnt++
 			if cnt == msgcount-1 {
-				return
+				break
 			}
 		}
 	}()
