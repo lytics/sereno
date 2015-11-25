@@ -16,7 +16,7 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 ## Sereno's Recipes:
 
 ###### Leader Election :
-
+WORK IN PROGRESS...
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	leadership, err := sereno.NewLeaderElection(context.Background(), "leader-topology1", kapi)
@@ -40,8 +40,8 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 ```
 
 ###### Distributed Counters :
-
-**On server 1**
+---------------------------------------------------------------------------
+***On server 1***
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	cntr, err := sereno.NewCounter(context.Background(), "counter001", kapi)
@@ -51,7 +51,7 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 	err := cntr.Inc(1)
 ```
 
-**On server 2**
+***On server 2***
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	cntr, err := sereno.NewCounter(context.Background(), "counter001", kapi)
@@ -62,14 +62,15 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 ```
 
 ###### Distributed WaitGroup :
+---------------------------------------------------------------------------
 
 A distributed version of golang's WaitGroup.  
 
 Example:
 
-**Parent**
+***Parent***
 
-**i.e. waiting for workers to finish.**
+i.e. waiting for workers to finish.
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	dwg, err := sereno.NewWaitGroup(context.Background(), "workgroup0001", kapi)
@@ -80,9 +81,9 @@ Example:
 	dwg.Wait()
 ```
 
-**Child**
+***Child***
 
-**i.e. the ones doing the work that the "parent".**
+i.e. the ones doing the work that the "parent".
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
 	dwg, err := sereno.NewWaitGroup(context.Background(), "workgroup0001", kapi)
@@ -94,6 +95,7 @@ Example:
 ```
 
 ###### Topic Based PubSub :
+---------------------------------------------------------------------------
 
 This is a topic based pub/sub message bus using etcd.  This solution isn't going to be good for high volume message (see [Kafka8+sarama](https://github.com/Shopify/sarama), [gnatsd](https://github.com/nats-io/gnatsd),etc if you need high throughput message loads).  From my testing this does fine upto about 200 msgs/second.  
 
@@ -101,7 +103,7 @@ So with that caveat why use it? Convenience!   If your already uses this library
 
 ####### Example:
 
-**Publisher:**
+***Publisher:***
 
 ```go
 	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
@@ -116,7 +118,7 @@ So with that caveat why use it? Convenience!   If your already uses this library
 
 ```
 
-**Subscriber:**
+***Subscriber:***
 
 ```go
     sub, err := sereno.NewPubSubTopic(context.Background(), "topic42", kapi)
@@ -143,7 +145,7 @@ So with that caveat why use it? Convenience!   If your already uses this library
 
 
 ###### Node keep alive :
-
+---------------------------------------------------------------------------
 This struct is useful to announcing that this node is still alive.  A common use of this pattern is to refresh an etcd node's ttl every so often (i.e. 30 seconds), so that a collection of actors can be detect when other actors enter or leave the topology.    
 
 This will eventually be a building block for a Leader Election Recipe. 
@@ -161,6 +163,8 @@ func main(){
 ```
 
 ###### Time Sortable Disbuited UUIDs (via [SonyFlake](https://github.com/sony/sonyflake)).  
+---------------------------------------------------------------------------
+
 Sonyflake is a distributed unique ID generator inspired by [Twitter's Snowflake](https://blog.twitter.com/2010/announcing-snowflake).  
 A Sonyflake ID is composed of
 
