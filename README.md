@@ -4,9 +4,12 @@
 [![Build Status](https://travis-ci.org/lytics/sereno.svg?branch=master)](https://travis-ci.org/lytics/sereno)
 [![GoDoc](https://godoc.org/github.com/lytics/sereno?status.svg)](https://godoc.org/github.com/lytics/sereno)
 
+## Status 
+**A work in progress.**  But I'm planning to have it usable in a couple of months. (~Jan 2016).  
+
 ## Why Sereno?
 
-sereno means night watchman in Spanish and since this project is inspired by the curator library for zookeeper, it seemed like a good choice. 
+Sereno means night watchman in Spanish and since this project is inspired by the curator library for zookeeper, it seemed like a good choice. 
 
 ## Inspiration:
 
@@ -15,31 +18,10 @@ Inspired by the recipes in the curator library.  http://curator.apache.org/curat
 
 ## Sereno's Recipes:
 
-###### Leader Election :
-WORK IN PROGRESS...
-```go
-	kapi := client.NewKeysAPI(c) // the etcd client form: https://github.com/coreos/etcd/tree/master/client
-	leadership, err := sereno.NewLeaderElection(context.Background(), "leader-topology1", kapi)
-	if err != nil {
-		log.Fatalf("error:", err)
-	}
-	leadership.OnElectedLeader(func(t sereno.Topology){
-		//Do leader stuff
-	})
-	leadership.OnElectedFollower(func(t sereno.Topology){
-		//Do follower stuff
-	})
-	//[Optional]
-	leadership.OnPeerJoin(func(t sereno.Topology){
-		//Do follower stuff
-	})
-	//[Optional]
-	leadership.OnPeerLeave(func(t sereno.Topology){
-		//Do follower stuff
-	})
-```
+##### Leader Election :
+coming soon! 
 
-###### Distributed Counters :
+##### Distributed Counters :
 ---------------------------------------------------------------------------
 *On server 1*
 ```go
@@ -61,7 +43,7 @@ WORK IN PROGRESS...
 	err := cntr.Inc(1)
 ```
 
-###### Distributed WaitGroup :
+##### Distributed WaitGroup :
 ---------------------------------------------------------------------------
 
 A distributed version of golang's WaitGroup.  
@@ -94,7 +76,7 @@ i.e. the ones doing the work that the "parent".
 	dwg.Done()
 ```
 
-###### Topic Based PubSub :
+##### Topic Based PubSub :
 ---------------------------------------------------------------------------
 
 This is a topic based pub/sub message bus using etcd.  This solution isn't going to be good for high volume message (see [Kafka8+sarama](https://github.com/Shopify/sarama), [gnatsd](https://github.com/nats-io/gnatsd),etc if you need high throughput message loads).  From my testing this does fine upto about 200 msgs/second.  
@@ -144,11 +126,11 @@ So with that caveat why use it? Convenience!   If your already uses this library
 ```
 
 
-###### Node keep alive :
+##### Node keep alive :
 ---------------------------------------------------------------------------
 This struct is useful to announcing that this node is still alive.  A common use of this pattern is to refresh an etcd node's ttl every so often (i.e. 30 seconds), so that a collection of actors can be detect when other actors enter or leave the topology.    
 
-This will eventually be a building block for a Leader Election Recipe. 
+This is a building block for patterns like Leader Election, for detecting nodes leaving your topology.  
 
 ```go
 func main(){
@@ -157,12 +139,12 @@ func main(){
 	if err != nil {
 		log.Fatalf("error:", err)
 	}
-	defer keepalive.Stop() //[Optional] just explicitly stops the keepalive, not really needed if your going to exit though...   
+	defer keepalive.Stop() //[Optional] just explicitly stops the keepalive but it doesn't remove the etcd node.
 	//... 
 }
 ```
 
-###### Time Sortable Disbuited UUIDs (via [SonyFlake](https://github.com/sony/sonyflake)).  
+##### Time Sortable Disbuited UUIDs (via [SonyFlake](https://github.com/sony/sonyflake)).  
 ---------------------------------------------------------------------------
 
 Sonyflake is a distributed unique ID generator inspired by [Twitter's Snowflake](https://blog.twitter.com/2010/announcing-snowflake).  
