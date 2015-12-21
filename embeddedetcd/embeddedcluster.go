@@ -31,9 +31,9 @@ import (
 )
 
 const (
-	tickDuration   = 10 * time.Millisecond
-	clusterName    = "etcd"
-	requestTimeout = 20 * time.Second
+	tickDuration   = 20 * time.Millisecond
+	clusterName    = "etcd-embedded"
+	requestTimeout = 50 * time.Second
 )
 
 var (
@@ -65,6 +65,7 @@ type EtcdCluster struct {
 // NewCluster returns an unlaunched cluster of the given size which has been
 // set to use static bootstrap.
 func NewCluster( size int, usePeerTLS bool) *EtcdCluster {
+	time.Sleep(200 * time.Millisecond)
 	c := &EtcdCluster{}
 	ms := make([]*member, size)
 	for i := 0; i < size; i++ {
@@ -79,6 +80,7 @@ func NewCluster( size int, usePeerTLS bool) *EtcdCluster {
 }
 
 func (c *EtcdCluster) Launch() {
+	time.Sleep(200 * time.Millisecond)
 	errc := make(chan error)
 	for _, m := range c.Members {
 		// Members are launched in separate goroutines because if they boot
@@ -170,6 +172,7 @@ func (c *EtcdCluster) Terminate(wipe_data bool) {
 	for _, m := range c.Members {
 		m.Terminate(wipe_data)
 	}
+	time.Sleep(200 * time.Millisecond)
 }
 
 func (c *EtcdCluster) addMember(usePeerTLS bool) {
@@ -230,6 +233,7 @@ func fillClusterForMembers(ms []*member) error {
 }
 
 func (c *EtcdCluster) waitMembersMatch( membs []client.Member) {
+	time.Sleep(200 * time.Millisecond)
 	for _, u := range c.URLs() {
 		cc := mustNewHTTPClient( []string{u})
 		ma := client.NewMembersAPI(cc)
@@ -420,6 +424,7 @@ func (m *member) Clone() *member {
 // Launch starts a member based on ServerConfig, PeerListeners
 // and ClientListeners.
 func (m *member) Launch() error {
+	time.Sleep(100 * time.Millisecond)
 	var err error
 	if m.s, err = etcdserver.NewServer(&m.ServerConfig); err != nil {
 		return fmt.Errorf("failed to initialize the etcd server: %v", err)

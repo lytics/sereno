@@ -3,6 +3,7 @@ package sereno_test
 import (
 	"fmt"
 	"log"
+	"os"
 	"path"
 	"runtime"
 	"strings"
@@ -72,7 +73,7 @@ func NewTestCaseTimeout(t *testing.T, timeout, delay time.Duration) *TestcaseTim
 		select {
 		case <-time.After(timeout):
 			fmt.Printf("testcase timed out: callstack : %v\n", callstack)
-			panic("timeout")
+			os.Exit(1)
 		case <-done:
 		}
 	}()

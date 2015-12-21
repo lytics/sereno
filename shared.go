@@ -19,39 +19,39 @@ func dice() *rand.Rand {
 	return rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
 }
 
-func CompareAndSwapUntil(ctx context.Context, tries int, keyid string, kapi etcdc.KeysAPI,
+func compareAndSwapUntil(ctx context.Context, tries int, keyid string, kapi etcdc.KeysAPI,
 	evaluator func(res *etcdc.Response, setOpts *etcdc.SetOptions) (val string, err error),
 ) error {
 	//uncomment for debugging..
 	id := int64(0)
-	if UseTraceLogging {
+	if Usedtracedlogging {
 		id = dice().Int63()
 	}
 	for i := 0; i < tries; i++ {
 		resp, err := kapi.Get(ctx, keyid, &etcdc.GetOptions{Quorum: true})
 		if err != nil {
-			Log("%v kapi get error %v", keyid, err)
+			dlog("%v kapi get error %v", keyid, err)
 			return err
 		}
 
 		opt := &etcdc.SetOptions{}
 		nv, err := evaluator(resp, opt)
 		if err != nil {
-			Log("%v eval error %v", keyid, err)
+			dlog("%v eval error %v", keyid, err)
 			return err
 		}
 
-		Trace("before: %v \tnewval:%v try:%v idx:%v key:%v", id, nv, i, resp.Index, keyid)
+		dtrace("before: %v \tnewval:%v try:%v idx:%v key:%v", id, nv, i, resp.Index, keyid)
 		_, err = kapi.Set(ctx, keyid, nv, opt)
 		if err == nil {
-			Log("%v update successful %v", keyid, err)
+			dlog("%v update successful %v", keyid, err)
 			return nil
 		} else if !IsCompareAndSwapFailure(err) {
-			Log("unexpected error %v", err)
+			dlog("unexpected error %v", err)
 			return err
 		}
 
-		Trace("after : %v \tnewval:%v try:%v key:%v error: %v", id, nv, i, keyid, err)
+		dtrace("after : %v \tnewval:%v try:%v key:%v error: %v", id, nv, i, keyid, err)
 
 		backoff(i)
 	}
@@ -106,19 +106,19 @@ func backoff(try int) {
 //
 // LOGGING
 //
-var UseDebugLogging = false
-var UseTraceLogging = false
+var UseDebugdlogging = false
+var Usedtracedlogging = false
 
 var std = log.New(os.Stderr, "           ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
 
-func Log(format string, v ...interface{}) {
-	if UseDebugLogging {
+func dlog(format string, v ...interface{}) {
+	if UseDebugdlogging {
 		std.Output(2, fmt.Sprintf(format, v...))
 	}
 }
 
-func Trace(format string, v ...interface{}) {
-	if UseTraceLogging {
+func dtrace(format string, v ...interface{}) {
+	if Usedtracedlogging {
 		std.Output(2, fmt.Sprintf(format, v...))
 	}
 }

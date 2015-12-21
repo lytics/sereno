@@ -21,7 +21,7 @@ func NewDistributedWaitGroup(ctx context.Context, ttl time.Duration, wgkeyid str
 		return nil, err
 	}
 
-	Log("new waitgroup for %v, ttl:%v", wgcntr, ttl)
+	dlog("new waitgroup for %v, ttl:%v", wgcntr, ttl)
 
 	//TODO add distributed locks to prevent anyone calling Add(N) after the first actor has called
 	//     Wait().  No guards for that right now.
@@ -42,14 +42,14 @@ type DistributedWaitGroup struct {
 
 //Add adds an expected number of works to wait on.
 func (wg *DistributedWaitGroup) Add(delta int) error {
-	Log("add for %v, delta:%v", wg.wgcntr, delta)
+	dlog("add for %v, delta:%v", wg.wgcntr, delta)
 
 	return wg.waitcounter.Inc(delta)
 }
 
 //Done signals the parent that this workers has finished.
 func (wg *DistributedWaitGroup) Done() error {
-	Log("done call for %v", wg.wgcntr)
+	dlog("done call for %v", wg.wgcntr)
 
 	return wg.waitcounter.Dec(1)
 }
@@ -62,31 +62,66 @@ func (wg *DistributedWaitGroup) Done() error {
 // which doesn't allow you to add workers after calling Wait().
 // So be careful...
 func (wg *DistributedWaitGroup) Wait() error {
-	out, err := wg.waitcounter.Watch()
-	if err != nil {
-		return err
-	}
+	dlog("wait call for %v", wg.wgcntr)
 
-	Log("wait call for %v", wg.wgcntr)
+	waittime := 100     //100 milliseconds
+	minwait := 100      //100 milliseconds
+	maxwait := 1000 * 4 //4 seconds
 
+	try := 0
+	lastval := 0
 	for {
-		i, ok := <-out
-		if !ok {
-			return fmt.Errorf("underlying watch channel closed.  unexpected ???")
+
+		time.Sleep(time.Duration(waittime) * time.Millisecond)
+
+		//slow, but more accurate giving all the issues with watches...
+		cnt, err := wg.waitcounter.Val()
+		if err != nil {
+			try++
+			if try == 100 {
+				return fmt.Errorf("get key watch error:%v", err)
+			}
+			backoff(try + 1000)
+			continue
 		}
-		if i.Cnt == 0 {
+		try = 0
+
+		//pply adaptive polling logic
+		if cnt != lastval {
+			//speed up fast using powers of 2
+			waittime = max(minwait, waittime/2)
+		} else {
+			//slow down slow using addition 
+			waittime = min(maxwait, waittime+80)
+		}
+
+		lastval = cnt
+
+		if cnt == 0 {
 			return nil
 		}
-		if i.Cnt < 0 {
+		if cnt < 0 {
 			return fmt.Errorf("Calling Done() has lead to the wait count going negative.  Did you forget to call Add()?")
 		}
 	}
-
-	return err
 }
 
 // WgCount is a helper function to extract the number of workers this waitgroup is currently waiting on.
 // useful for tests that aren't exiting.
 func WgCount(wg *DistributedWaitGroup) (int, error) {
 	return wg.waitcounter.Val()
+}
+
+func max(x, y int) int {
+	if x > y {
+		return x
+	}
+	return y
+}
+
+func min(x, y int) int {
+	if x > y {
+		return y
+	}
+	return x
 }

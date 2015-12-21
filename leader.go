@@ -6,7 +6,7 @@ import (
 )
 
 func NewLeaderElection(ctx context.Context, electionname string, kapi etcdc.KeysAPI) (l *Leadership, err error) {
-	Log("leader:")
+	dlog("leader:")
 	return nil, nil
 }
 
