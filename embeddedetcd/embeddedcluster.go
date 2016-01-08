@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time" 
+	"runtime"
 
 	"github.com/coreos/etcd/client"
 	"github.com/coreos/etcd/etcdserver"
@@ -50,11 +51,11 @@ func init() {
 }
 
 func TestClusterOf1()*EtcdCluster { 
-	c := NewCluster( 1, false) 
+	c := NewCluster( 1, false, "") 
 	return c
 }
 func TestClusterOf3()*EtcdCluster { 
-	c := NewCluster( 3, false) 
+	c := NewCluster( 3, false, "") 
 	return c 
 }
 
@@ -64,12 +65,12 @@ type EtcdCluster struct {
 
 // NewCluster returns an unlaunched cluster of the given size which has been
 // set to use static bootstrap.
-func NewCluster( size int, usePeerTLS bool) *EtcdCluster {
+func NewCluster( size int, usePeerTLS bool, addr string) *EtcdCluster {
 	time.Sleep(200 * time.Millisecond)
 	c := &EtcdCluster{}
 	ms := make([]*member, size)
 	for i := 0; i < size; i++ {
-		ms[i] = mustNewMember( c.Name(i), usePeerTLS)
+		ms[i] = mustNewMember( c.Name(i), usePeerTLS, addr)
 	}
 	c.Members = ms
 	if err := fillClusterForMembers(c.Members); err != nil {
@@ -86,6 +87,13 @@ func (c *EtcdCluster) Launch() {
 		// Members are launched in separate goroutines because if they boot
 		// using discovery url, they have to wait for others to register to continue.
 		go func(m *member) {
+			defer func() {
+				if r := recover(); r != nil {
+					buf := make([]byte, 4096)
+					runtime.Stack(buf, false)
+					log.Fatalf("panic:%v\n stack:\n%s \n", r, string(buf))
+				}
+			}()
 			errc <- m.Launch()
 		}(m)
 	}
@@ -131,12 +139,12 @@ func (c *EtcdCluster) HTTPMembers() []client.Member {
 	return ms
 }
 
-func (c *EtcdCluster) AddMember() {
-	c.addMember( false)
+func (c *EtcdCluster) AddMember(addr string) {
+	c.addMember( false, addr)
 }
 
-func (c *EtcdCluster) AddTLSMember() {
-	c.addMember( true)
+func (c *EtcdCluster) AddTLSMember(addr string) {
+	c.addMember( true, addr)
 }
 
 func (c *EtcdCluster) RemoveMember( id uint64) {
@@ -175,8 +183,8 @@ func (c *EtcdCluster) Terminate(wipe_data bool) {
 	time.Sleep(200 * time.Millisecond)
 }
 
-func (c *EtcdCluster) addMember(usePeerTLS bool) {
-	m := mustNewMember( c.Name(rand.Int()), usePeerTLS)
+func (c *EtcdCluster) addMember(usePeerTLS bool, addr string) {
+	m := mustNewMember( c.Name(rand.Int()), usePeerTLS, addr)
 	scheme := "http"
 	if usePeerTLS {
 		scheme = "https"
@@ -308,10 +316,13 @@ func newLocalListener() net.Listener {
 func newListenerWithAddr( addr string) net.Listener {
 	var err error
 	var l net.Listener
+	addr = strings.TrimRight(addr, ":")
 	// TODO: we want to reuse a previous closed port immediately.
 	// a better way is to set SO_REUSExx instead of doing retry.
 	for i := 0; i < 5; i++ {
-		l, err = net.Listen("tcp", addr)
+		port := atomic.AddInt64(&nextListenPort, 1)
+		a :=  addr+":"+strconv.FormatInt(port, 10)
+		l, err = net.Listen("tcp", a)
 		if err == nil {
 			break
 		}
@@ -337,7 +348,7 @@ type member struct {
 // mustNewMember return an inited member with the given name. If usePeerTLS is
 // true, it will set PeerTLSInfo and use https scheme to communicate between
 // peers.
-func mustNewMember(name string, usePeerTLS bool) *member {
+func mustNewMember(name string, usePeerTLS bool, addr string) *member {
 	var (
 		testTLSInfo = transport.TLSInfo{
 			KeyFile:        "./fixtures/server.key.insecure",
@@ -353,8 +364,12 @@ func mustNewMember(name string, usePeerTLS bool) *member {
 	if usePeerTLS {
 		peerScheme = "https"
 	}
-
-	pln := newLocalListener()
+	var pln net.Listener
+	if addr == "" { 
+		pln = newLocalListener()
+	}else{
+		pln = newListenerWithAddr(addr)
+	} 
 	m.PeerListeners = []net.Listener{pln}
 	m.PeerURLs, err = types.NewURLs([]string{peerScheme + "://" + pln.Addr().String()})
 	if err != nil {
@@ -364,7 +379,12 @@ func mustNewMember(name string, usePeerTLS bool) *member {
 		m.PeerTLSInfo = testTLSInfo
 	}
 
-	cln := newLocalListener()
+	var cln net.Listener
+	if addr == "" { 
+		cln = newLocalListener()
+	}else{
+		cln = newListenerWithAddr(addr)
+	} 
 	m.ClientListeners = []net.Listener{cln}
 	m.ClientURLs, err = types.NewURLs([]string{"http://" + cln.Addr().String()})
 	if err != nil {
