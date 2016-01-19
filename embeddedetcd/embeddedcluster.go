@@ -147,7 +147,7 @@ func (c *EtcdCluster) AddTLSMember(addr string) {
 	c.addMember( true, addr)
 }
 
-func (c *EtcdCluster) RemoveMember( id uint64) {
+func (c *EtcdCluster) RemoveMember( id uint64) error{
 	// send remove request to the cluster
 	cc := mustNewHTTPClient( c.URLs())
 	ma := client.NewMembersAPI(cc)
@@ -167,13 +167,14 @@ func (c *EtcdCluster) RemoveMember( id uint64) {
 			// 1s stop delay + election timeout + 1s disk and network delay + connection write timeout
 			// TODO: remove connection write timeout by selecting on http response closeNotifier
 			// blocking on https://github.com/golang/go/issues/9524
-			case <-time.After(time.Second + time.Duration(electionTicks)*tickDuration + time.Second + rafthttp.ConnWriteTimeout):
-				log.Fatalf("failed to remove member %s in time", m.s.ID())
+			case <-time.After(15 * time.Second + rafthttp.ConnWriteTimeout):
+				return fmt.Errorf("failed to remove member %s in time")
 			}
 		}
 	}
 	c.Members = newMembers
 	c.waitMembersMatch( c.HTTPMembers())
+	return nil
 }
 
 func (c *EtcdCluster) Terminate(wipe_data bool) {
