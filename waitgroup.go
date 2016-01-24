@@ -44,7 +44,8 @@ type DistributedWaitGroup struct {
 func (wg *DistributedWaitGroup) Add(delta int) error {
 	dlog("add for %v, delta:%v", wg.wgcntr, delta)
 
-	return wg.waitcounter.Inc(delta)
+	_, err := wg.waitcounter.Inc(delta)
+	return err
 }
 
 //Done signals the parent that this workers has finished.
@@ -91,7 +92,7 @@ func (wg *DistributedWaitGroup) Wait() error {
 			//speed up fast using powers of 2
 			waittime = max(minwait, waittime/2)
 		} else {
-			//slow down slow using addition 
+			//slow down slow using addition
 			waittime = min(maxwait, waittime+80)
 		}
 

@@ -35,8 +35,9 @@ func TestCounterInc(t *testing.T) {
 			AssertT(t, err == nil, "err should be nil, got:%v", err)
 
 			for i := 0; i < wrkersInc; i++ {
-				err := cntr.Inc(1)
+				cntVal, err := cntr.Inc(1)
 				AssertT(t, err == nil, "err should be nil, got:%v", err)
+				AssertT(t, cntVal > 0 && cntVal < wrkers+1, "Should be in range of workers: %v", cntVal)
 			}
 			alldone.Done()
 		}()

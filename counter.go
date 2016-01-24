@@ -59,10 +59,11 @@ func (c *DistributedCounter) Set(val int) error {
 	return err
 }
 
-func (c *DistributedCounter) Inc(n int) error {
+func (c *DistributedCounter) Inc(n int) (int, error) {
 	const tries = 256
 
 	dlog("inc:%v val:%v", c.keyid, n)
+	result := 0
 
 	evaluator := func(res *etcdc.Response, setOpts *etcdc.SetOptions) (val string, err error) {
 		valstr := res.Node.Value
@@ -70,15 +71,15 @@ func (c *DistributedCounter) Inc(n int) error {
 		if err != nil {
 			return "", err
 		}
-		n := i + n
+		result = i + n
 
 		setOpts.TTL = c.ttl // update the ttl also
 		setOpts.PrevValue = res.Node.Value
 
-		return strconv.Itoa(n), nil
+		return strconv.Itoa(result), nil
 	}
 
-	return compareAndSwapUntil(context.Background(), tries, c.keyid, c.kapi, evaluator)
+	return result, compareAndSwapUntil(context.Background(), tries, c.keyid, c.kapi, evaluator)
 }
 
 func (c *DistributedCounter) Dec(n int) error {
