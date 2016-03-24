@@ -1,8 +1,6 @@
 //Copied from https://github.com/coreos/etcd/blob/df7074911e1745a607348f8559470ed195e2ae15/integration/cluster_test.go#L732
 
-
 package embeddedetcd
-
 
 import (
 	"fmt"
@@ -14,13 +12,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
-	"time" 
-	"runtime"
+	"time"
 
+	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
 	"github.com/coreos/etcd/client"
 	"github.com/coreos/etcd/etcdserver"
 	"github.com/coreos/etcd/etcdserver/etcdhttp"
@@ -28,7 +27,7 @@ import (
 	"github.com/coreos/etcd/pkg/transport"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/rafthttp"
-    "golang.org/x/net/context"
+	"golang.org/x/net/context"
 )
 
 const (
@@ -47,16 +46,17 @@ var (
 
 func init() {
 	// open microsecond-level time log for integration test debugging
-	log.SetFlags(log.Ltime | log.Lmicroseconds | log.Lshortfile)
+	//log.SetFlags(log.Ltime | log.Lmicroseconds | log.Lshortfile)
+	capnslog.SetGlobalLogLevel(capnslog.CRITICAL)
 }
 
-func TestClusterOf1()*EtcdCluster { 
-	c := NewCluster( 1, false, "") 
+func TestClusterOf1() *EtcdCluster {
+	c := NewCluster(1, false, "")
 	return c
 }
-func TestClusterOf3()*EtcdCluster { 
-	c := NewCluster( 3, false, "") 
-	return c 
+func TestClusterOf3() *EtcdCluster {
+	c := NewCluster(3, false, "")
+	return c
 }
 
 type EtcdCluster struct {
@@ -65,12 +65,12 @@ type EtcdCluster struct {
 
 // NewCluster returns an unlaunched cluster of the given size which has been
 // set to use static bootstrap.
-func NewCluster( size int, usePeerTLS bool, addr string) *EtcdCluster {
+func NewCluster(size int, usePeerTLS bool, addr string) *EtcdCluster {
 	time.Sleep(200 * time.Millisecond)
 	c := &EtcdCluster{}
 	ms := make([]*member, size)
 	for i := 0; i < size; i++ {
-		ms[i] = mustNewMember( c.Name(i), usePeerTLS, addr)
+		ms[i] = mustNewMember(c.Name(i), usePeerTLS, addr)
 	}
 	c.Members = ms
 	if err := fillClusterForMembers(c.Members); err != nil {
@@ -103,7 +103,7 @@ func (c *EtcdCluster) Launch() {
 		}
 	}
 	// wait cluster to be stable to receive future client requests
-	c.waitMembersMatch( c.HTTPMembers())
+	c.waitMembersMatch(c.HTTPMembers())
 	c.waitVersion()
 }
 
@@ -140,16 +140,16 @@ func (c *EtcdCluster) HTTPMembers() []client.Member {
 }
 
 func (c *EtcdCluster) AddMember(addr string) {
-	c.addMember( false, addr)
+	c.addMember(false, addr)
 }
 
 func (c *EtcdCluster) AddTLSMember(addr string) {
-	c.addMember( true, addr)
+	c.addMember(true, addr)
 }
 
-func (c *EtcdCluster) RemoveMember( id uint64) error{
+func (c *EtcdCluster) RemoveMember(id uint64) error {
 	// send remove request to the cluster
-	cc := mustNewHTTPClient( c.URLs())
+	cc := mustNewHTTPClient(c.URLs())
 	ma := client.NewMembersAPI(cc)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	if err := ma.Remove(ctx, types.ID(id).String()); err != nil {
@@ -167,13 +167,13 @@ func (c *EtcdCluster) RemoveMember( id uint64) error{
 			// 1s stop delay + election timeout + 1s disk and network delay + connection write timeout
 			// TODO: remove connection write timeout by selecting on http response closeNotifier
 			// blocking on https://github.com/golang/go/issues/9524
-			case <-time.After(15 * time.Second + rafthttp.ConnWriteTimeout):
+			case <-time.After(15*time.Second + rafthttp.ConnWriteTimeout):
 				return fmt.Errorf("failed to remove member %s in time")
 			}
 		}
 	}
 	c.Members = newMembers
-	c.waitMembersMatch( c.HTTPMembers())
+	c.waitMembersMatch(c.HTTPMembers())
 	return nil
 }
 
@@ -185,14 +185,14 @@ func (c *EtcdCluster) Terminate(wipe_data bool) {
 }
 
 func (c *EtcdCluster) addMember(usePeerTLS bool, addr string) {
-	m := mustNewMember( c.Name(rand.Int()), usePeerTLS, addr)
+	m := mustNewMember(c.Name(rand.Int()), usePeerTLS, addr)
 	scheme := "http"
 	if usePeerTLS {
 		scheme = "https"
 	}
 
 	// send add request to the cluster
-	cc := mustNewHTTPClient( []string{c.URL(0)})
+	cc := mustNewHTTPClient([]string{c.URL(0)})
 	ma := client.NewMembersAPI(cc)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	peerURL := scheme + "://" + m.PeerListeners[0].Addr().String()
@@ -203,7 +203,7 @@ func (c *EtcdCluster) addMember(usePeerTLS bool, addr string) {
 
 	// wait for the add node entry applied in the cluster
 	members := append(c.HTTPMembers(), client.Member{PeerURLs: []string{peerURL}, ClientURLs: []string{}})
-	c.waitMembersMatch( members)
+	c.waitMembersMatch(members)
 
 	m.InitialPeerURLsMap = types.URLsMap{}
 	for _, mm := range c.Members {
@@ -216,7 +216,7 @@ func (c *EtcdCluster) addMember(usePeerTLS bool, addr string) {
 	}
 	c.Members = append(c.Members, m)
 	// wait cluster to be stable to receive future client requests
-	c.waitMembersMatch( c.HTTPMembers())
+	c.waitMembersMatch(c.HTTPMembers())
 }
 
 func fillClusterForMembers(ms []*member) error {
@@ -241,10 +241,10 @@ func fillClusterForMembers(ms []*member) error {
 	return nil
 }
 
-func (c *EtcdCluster) waitMembersMatch( membs []client.Member) {
+func (c *EtcdCluster) waitMembersMatch(membs []client.Member) {
 	time.Sleep(200 * time.Millisecond)
 	for _, u := range c.URLs() {
-		cc := mustNewHTTPClient( []string{u})
+		cc := mustNewHTTPClient([]string{u})
 		ma := client.NewMembersAPI(cc)
 		for {
 			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
@@ -259,7 +259,7 @@ func (c *EtcdCluster) waitMembersMatch( membs []client.Member) {
 	return
 }
 
-func (c *EtcdCluster) waitLeader( membs []*member) {
+func (c *EtcdCluster) waitLeader(membs []*member) {
 	possibleLead := make(map[uint64]bool)
 	var lead uint64
 	for _, m := range membs {
@@ -314,7 +314,7 @@ func newLocalListener() net.Listener {
 	return l
 }
 
-func newListenerWithAddr( addr string) net.Listener {
+func newListenerWithAddr(addr string) net.Listener {
 	var err error
 	var l net.Listener
 	addr = strings.TrimRight(addr, ":")
@@ -322,7 +322,7 @@ func newListenerWithAddr( addr string) net.Listener {
 	// a better way is to set SO_REUSExx instead of doing retry.
 	for i := 0; i < 5; i++ {
 		port := atomic.AddInt64(&nextListenPort, 1)
-		a :=  addr+":"+strconv.FormatInt(port, 10)
+		a := addr + ":" + strconv.FormatInt(port, 10)
 		l, err = net.Listen("tcp", a)
 		if err == nil {
 			break
@@ -366,11 +366,11 @@ func mustNewMember(name string, usePeerTLS bool, addr string) *member {
 		peerScheme = "https"
 	}
 	var pln net.Listener
-	if addr == "" { 
+	if addr == "" {
 		pln = newLocalListener()
-	}else{
+	} else {
 		pln = newListenerWithAddr(addr)
-	} 
+	}
 	m.PeerListeners = []net.Listener{pln}
 	m.PeerURLs, err = types.NewURLs([]string{peerScheme + "://" + pln.Addr().String()})
 	if err != nil {
@@ -381,11 +381,11 @@ func mustNewMember(name string, usePeerTLS bool, addr string) *member {
 	}
 
 	var cln net.Listener
-	if addr == "" { 
+	if addr == "" {
 		cln = newLocalListener()
-	}else{
+	} else {
 		cln = newListenerWithAddr(addr)
-	} 
+	}
 	m.ClientListeners = []net.Listener{cln}
 	m.ClientURLs, err = types.NewURLs([]string{"http://" + cln.Addr().String()})
 	if err != nil {
@@ -483,7 +483,7 @@ func (m *member) Launch() error {
 }
 
 func (m *member) WaitOK() {
-	cc := mustNewHTTPClient( []string{m.URL()})
+	cc := mustNewHTTPClient([]string{m.URL()})
 	kapi := client.NewKeysAPI(cc)
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
@@ -531,7 +531,7 @@ func (m *member) Restart() error {
 	m.PeerListeners = newPeerListeners
 	newClientListeners := make([]net.Listener, 0)
 	for _, ln := range m.ClientListeners {
-		newClientListeners = append(newClientListeners, newListenerWithAddr( ln.Addr().String()))
+		newClientListeners = append(newClientListeners, newListenerWithAddr(ln.Addr().String()))
 	}
 	m.ClientListeners = newClientListeners
 	return m.Launch()
@@ -549,8 +549,8 @@ func (m *member) Terminate(wipe_data bool) {
 	}
 }
 
-func mustNewHTTPClient( eps []string) client.Client {
-	cfg := client.Config{Transport: mustNewTransport( transport.TLSInfo{}), Endpoints: eps}
+func mustNewHTTPClient(eps []string) client.Client {
+	cfg := client.Config{Transport: mustNewTransport(transport.TLSInfo{}), Endpoints: eps}
 	c, err := client.New(cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -558,7 +558,7 @@ func mustNewHTTPClient( eps []string) client.Client {
 	return c
 }
 
-func mustNewTransport( tlsInfo transport.TLSInfo) *http.Transport {
+func mustNewTransport(tlsInfo transport.TLSInfo) *http.Transport {
 	// tick in integration test is short, so 1s dial timeout could play well.
 	tr, err := transport.NewTimeoutTransport(tlsInfo, time.Second, rafthttp.ConnReadTimeout, rafthttp.ConnWriteTimeout)
 	if err != nil {

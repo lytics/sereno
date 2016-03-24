@@ -109,7 +109,7 @@ func backoff(try int) {
 var UseDebugdlogging = false
 var Usedtracedlogging = false
 
-var std = log.New(os.Stderr, "           ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
+var std = log.New(os.StdErr, "           ", log.Ltime|log.Lmicroseconds|log.Lshortfile)
 
 func dlog(format string, v ...interface{}) {
 	if UseDebugdlogging {
