@@ -1,576 +1,165 @@
-//Copied from https://github.com/coreos/etcd/blob/df7074911e1745a607348f8559470ed195e2ae15/integration/cluster_test.go#L732
-
 package embeddedetcd
 
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
-	"math/rand"
 	"net"
-	"net/http"
-	"net/http/httptest"
+	"net/url"
 	"os"
-	"reflect"
-	"runtime"
-	"sort"
-	"strconv"
 	"strings"
-	"sync/atomic"
+	"testing"
 	"time"
 
-	"github.com/coreos/etcd/Godeps/_workspace/src/github.com/coreos/pkg/capnslog"
-	"github.com/coreos/etcd/client"
-	"github.com/coreos/etcd/etcdserver"
-	"github.com/coreos/etcd/etcdserver/etcdhttp"
-	"github.com/coreos/etcd/pkg/testutil"
-	"github.com/coreos/etcd/pkg/transport"
-	"github.com/coreos/etcd/pkg/types"
-	"github.com/coreos/etcd/rafthttp"
-	"golang.org/x/net/context"
+	"github.com/coreos/etcd/clientv3"
+	"github.com/coreos/etcd/embed"
+	"github.com/coreos/pkg/capnslog"
 )
 
-const (
-	tickDuration   = 20 * time.Millisecond
-	clusterName    = "etcd-embedded"
-	requestTimeout = 50 * time.Second
-)
+// Cleanup by stopping embedded server and remvoing temp files.
+type Cleanup func() error
 
-var (
-	electionTicks = 10
+// StartAndConnect to the embedded server. Return the connected client,
+// the configuration of the embedded server, and a cleanup function
+// for shutdown.
+func StartAndConnect(t *testing.T) (*clientv3.Client, *embed.Config, Cleanup) {
+	embedCfg, cleanup := Start(t)
 
-	// integration test uses well-known ports to listen for each running member,
-	// which ensures restarted member could listen on specific port again.
-	nextListenPort int64 = 20000
-)
-
-func init() {
-	// open microsecond-level time log for integration test debugging
-	//log.SetFlags(log.Ltime | log.Lmicroseconds | log.Lshortfile)
-	capnslog.SetGlobalLogLevel(capnslog.CRITICAL)
-}
-
-func TestClusterOf1() *EtcdCluster {
-	c := NewCluster(1, false, "")
-	return c
-}
-func TestClusterOf3() *EtcdCluster {
-	c := NewCluster(3, false, "")
-	return c
-}
-
-type EtcdCluster struct {
-	Members []*member
-}
-
-// NewCluster returns an unlaunched cluster of the given size which has been
-// set to use static bootstrap.
-func NewCluster(size int, usePeerTLS bool, addr string) *EtcdCluster {
-	time.Sleep(200 * time.Millisecond)
-	c := &EtcdCluster{}
-	ms := make([]*member, size)
-	for i := 0; i < size; i++ {
-		ms[i] = mustNewMember(c.Name(i), usePeerTLS, addr)
-	}
-	c.Members = ms
-	if err := fillClusterForMembers(c.Members); err != nil {
-		log.Fatal(err)
+	endpoints := []string{}
+	for _, u := range embedCfg.LCUrls {
+		endpoints = append(endpoints, u.String())
 	}
 
-	return c
-}
-
-func (c *EtcdCluster) Launch() {
-	time.Sleep(200 * time.Millisecond)
-	errc := make(chan error)
-	for _, m := range c.Members {
-		// Members are launched in separate goroutines because if they boot
-		// using discovery url, they have to wait for others to register to continue.
-		go func(m *member) {
-			defer func() {
-				if r := recover(); r != nil {
-					buf := make([]byte, 4096)
-					runtime.Stack(buf, false)
-					log.Fatalf("panic:%v\n stack:\n%s \n", r, string(buf))
-				}
-			}()
-			errc <- m.Launch()
-		}(m)
+	cfg := clientv3.Config{
+		Endpoints: endpoints,
 	}
-	for range c.Members {
-		if err := <-errc; err != nil {
-			log.Fatalf("error setting up member: %v", err)
-		}
+
+	etcd, err := clientv3.New(cfg)
+	if err != nil {
+		t.Fatalf("embeddedetcd: failed creating new etcd client: %v", err)
 	}
-	// wait cluster to be stable to receive future client requests
-	c.waitMembersMatch(c.HTTPMembers())
-	c.waitVersion()
+
+	return etcd, embedCfg, cleanup
 }
 
-func (c *EtcdCluster) URL(i int) string {
-	return c.Members[i].ClientURLs[0].String()
-}
+// Start the embedded server and return the configuration used to start
+// it along with a cleanup function for shutdown.
+func Start(t *testing.T) (*embed.Config, Cleanup) {
+	cfg := embed.NewConfig()
 
-func (c *EtcdCluster) URLs() []string {
-	urls := make([]string, 0)
-	for _, m := range c.Members {
-		for _, u := range m.ClientURLs {
-			urls = append(urls, u.String())
-		}
+	// Create temp directory for data.
+	dir, err := ioutil.TempDir("", "etcd.testserver.")
+	if err != nil {
+		t.Fatalf("embeddedetcd: failed creating temp dir: %v", err)
 	}
-	return urls
-}
+	cfg.Dir = dir
 
-func (c *EtcdCluster) HTTPMembers() []client.Member {
-	ms := make([]client.Member, len(c.Members))
-	for i, m := range c.Members {
-		scheme := "http"
-		if !m.PeerTLSInfo.Empty() {
-			scheme = "https"
-		}
-		ms[i].Name = m.Name
-		for _, ln := range m.PeerListeners {
-			ms[i].PeerURLs = append(ms[i].PeerURLs, scheme+"://"+ln.Addr().String())
-		}
-		for _, ln := range m.ClientListeners {
-			ms[i].ClientURLs = append(ms[i].ClientURLs, "http://"+ln.Addr().String())
-		}
+	// Find usable URLs for the configuration.
+	err = initConfigURLs(cfg)
+	if err != nil {
+		t.Fatalf("embeddedetcd: failed to initialize embedded etcd configuration: %v", err)
 	}
-	return ms
-}
 
-func (c *EtcdCluster) AddMember(addr string) {
-	c.addMember(false, addr)
-}
+	// Dumb magic that has to be called after updating the URLs.
+	cfg.InitialCluster = cfg.InitialClusterFromName(cfg.Name)
+	cfg.Debug = true
 
-func (c *EtcdCluster) AddTLSMember(addr string) {
-	c.addMember(true, addr)
-}
-
-func (c *EtcdCluster) RemoveMember(id uint64) error {
-	// send remove request to the cluster
-	cc := mustNewHTTPClient(c.URLs())
-	ma := client.NewMembersAPI(cc)
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	if err := ma.Remove(ctx, types.ID(id).String()); err != nil {
-		log.Fatalf("unexpected remove error %v", err)
+	f, err := os.Create(cfg.Dir + "/" + "etcd.log")
+	if err != nil {
+		t.Fatalf("embeddedetcd: failed creating log file: %v", err)
 	}
-	cancel()
-	newMembers := make([]*member, 0)
-	for _, m := range c.Members {
-		if uint64(m.s.ID()) != id {
-			newMembers = append(newMembers, m)
-		} else {
-			select {
-			case <-m.s.StopNotify():
-				m.Terminate(false)
-			// 1s stop delay + election timeout + 1s disk and network delay + connection write timeout
-			// TODO: remove connection write timeout by selecting on http response closeNotifier
-			// blocking on https://github.com/golang/go/issues/9524
-			case <-time.After(15*time.Second + rafthttp.ConnWriteTimeout):
-				return fmt.Errorf("failed to remove member %s in time")
+	capnslog.SetFormatter(capnslog.NewPrettyFormatter(f, cfg.Debug))
+
+	e, err := embed.StartEtcd(cfg)
+	if err != nil {
+		t.Fatalf("embeddedetcd: failed call to start etcd embed: %v", err)
+	}
+
+	select {
+	case <-e.Server.ReadyNotify():
+	case <-time.After(60 * time.Second):
+		e.Server.Stop()
+		t.Fatal("embeddedetcd: failed to get ready notify")
+	}
+
+	select {
+	case err := <-e.Err():
+		t.Fatalf("embeddedetcd: failed post startup: %v", err)
+	default:
+	}
+
+	cleanup := func() error {
+		e.Close()
+		select {
+		case err := <-e.Err():
+			if err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
+				return fmt.Errorf("failed stopping server: %v", err)
 			}
+		default:
 		}
+		return os.RemoveAll(cfg.Dir)
 	}
-	c.Members = newMembers
-	c.waitMembersMatch(c.HTTPMembers())
+
+	return cfg, cleanup
+}
+
+// initConfigURLs sets the following fields in the config:
+//
+//      LPUrls
+//      LCUrls
+//      APUrls
+//      ACUrls
+//
+func initConfigURLs(cfg *embed.Config) error {
+	l1, _ := net.Listen("tcp", ":0")
+	defer l1.Close()
+	p1 := l1.Addr().(*net.TCPAddr).Port
+
+	l2, _ := net.Listen("tcp", ":0")
+	defer l2.Close()
+	p2 := l2.Addr().(*net.TCPAddr).Port
+
+	lh1 := fmt.Sprintf("http://localhost:%d", p1)
+	lh2 := fmt.Sprintf("http://localhost:%d", p2)
+	localUrl1, err := url.Parse(lh1)
+	if err != nil {
+		return err
+	}
+	localUrl2, err := url.Parse(lh2)
+	if err != nil {
+		return err
+	}
+
+	cfg.LPUrls = []url.URL{*localUrl1}
+	cfg.LCUrls = []url.URL{*localUrl2}
+
+	ip, err := getLocalIP()
+	if err != nil {
+		return err
+	}
+	ah1 := fmt.Sprintf("http://%s:%d", ip, p1)
+	ah2 := fmt.Sprintf("http://%s:%d", ip, p2)
+	adUrl1, _ := url.Parse(ah1)
+	adUrl2, _ := url.Parse(ah2)
+
+	cfg.APUrls = []url.URL{*adUrl1}
+	cfg.ACUrls = []url.URL{*adUrl2}
+
 	return nil
 }
 
-func (c *EtcdCluster) Terminate(wipe_data bool) {
-	for _, m := range c.Members {
-		m.Terminate(wipe_data)
+// getLocalIP returns the non loopback local IP of the host, or
+// an error if no such network IP exists.
+func getLocalIP() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", err
 	}
-	time.Sleep(200 * time.Millisecond)
-}
-
-func (c *EtcdCluster) addMember(usePeerTLS bool, addr string) {
-	m := mustNewMember(c.Name(rand.Int()), usePeerTLS, addr)
-	scheme := "http"
-	if usePeerTLS {
-		scheme = "https"
-	}
-
-	// send add request to the cluster
-	cc := mustNewHTTPClient([]string{c.URL(0)})
-	ma := client.NewMembersAPI(cc)
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	peerURL := scheme + "://" + m.PeerListeners[0].Addr().String()
-	if _, err := ma.Add(ctx, peerURL); err != nil {
-		log.Fatalf("add member on %s error: %v", c.URL(0), err)
-	}
-	cancel()
-
-	// wait for the add node entry applied in the cluster
-	members := append(c.HTTPMembers(), client.Member{PeerURLs: []string{peerURL}, ClientURLs: []string{}})
-	c.waitMembersMatch(members)
-
-	m.InitialPeerURLsMap = types.URLsMap{}
-	for _, mm := range c.Members {
-		m.InitialPeerURLsMap[mm.Name] = mm.PeerURLs
-	}
-	m.InitialPeerURLsMap[m.Name] = m.PeerURLs
-	m.NewCluster = false
-	if err := m.Launch(); err != nil {
-		log.Fatal(err)
-	}
-	c.Members = append(c.Members, m)
-	// wait cluster to be stable to receive future client requests
-	c.waitMembersMatch(c.HTTPMembers())
-}
-
-func fillClusterForMembers(ms []*member) error {
-	addrs := make([]string, 0)
-	for _, m := range ms {
-		scheme := "http"
-		if !m.PeerTLSInfo.Empty() {
-			scheme = "https"
-		}
-		for _, l := range m.PeerListeners {
-			addrs = append(addrs, fmt.Sprintf("%s=%s://%s", m.Name, scheme, l.Addr().String()))
-		}
-	}
-	clusterStr := strings.Join(addrs, ",")
-	var err error
-	for _, m := range ms {
-		m.InitialPeerURLsMap, err = types.NewURLsMap(clusterStr)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *EtcdCluster) waitMembersMatch(membs []client.Member) {
-	time.Sleep(200 * time.Millisecond)
-	for _, u := range c.URLs() {
-		cc := mustNewHTTPClient([]string{u})
-		ma := client.NewMembersAPI(cc)
-		for {
-			ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-			ms, err := ma.List(ctx)
-			cancel()
-			if err == nil && isMembersEqual(ms, membs) {
-				break
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String(), nil
 			}
-			time.Sleep(tickDuration)
 		}
 	}
-	return
+	return "", fmt.Errorf("failed to find network address")
 }
-
-func (c *EtcdCluster) waitLeader(membs []*member) {
-	possibleLead := make(map[uint64]bool)
-	var lead uint64
-	for _, m := range membs {
-		possibleLead[uint64(m.s.ID())] = true
-	}
-
-	for lead == 0 || !possibleLead[lead] {
-		lead = 0
-		for _, m := range membs {
-			if lead != 0 && lead != m.s.Lead() {
-				lead = 0
-				break
-			}
-			lead = m.s.Lead()
-		}
-		time.Sleep(10 * tickDuration)
-	}
-}
-
-func (c *EtcdCluster) waitVersion() {
-	for _, m := range c.Members {
-		for {
-			if m.s.ClusterVersion() != nil {
-				break
-			}
-			time.Sleep(tickDuration)
-		}
-	}
-}
-
-func (c *EtcdCluster) Name(i int) string {
-	return fmt.Sprint("node", i)
-}
-
-// isMembersEqual checks whether two members equal except ID field.
-// The given wmembs should always set ID field to empty string.
-func isMembersEqual(membs []client.Member, wmembs []client.Member) bool {
-	sort.Sort(SortableMemberSliceByPeerURLs(membs))
-	sort.Sort(SortableMemberSliceByPeerURLs(wmembs))
-	for i := range membs {
-		membs[i].ID = ""
-	}
-	return reflect.DeepEqual(membs, wmembs)
-}
-
-func newLocalListener() net.Listener {
-	port := atomic.AddInt64(&nextListenPort, 1)
-	l, err := net.Listen("tcp", "127.0.0.1:"+strconv.FormatInt(port, 10))
-	if err != nil {
-		log.Fatal(err)
-	}
-	return l
-}
-
-func newListenerWithAddr(addr string) net.Listener {
-	var err error
-	var l net.Listener
-	addr = strings.TrimRight(addr, ":")
-	// TODO: we want to reuse a previous closed port immediately.
-	// a better way is to set SO_REUSExx instead of doing retry.
-	for i := 0; i < 5; i++ {
-		port := atomic.AddInt64(&nextListenPort, 1)
-		a := addr + ":" + strconv.FormatInt(port, 10)
-		l, err = net.Listen("tcp", a)
-		if err == nil {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-	return l
-}
-
-type member struct {
-	etcdserver.ServerConfig
-	PeerListeners, ClientListeners []net.Listener
-	// inited PeerTLSInfo implies to enable peer TLS
-	PeerTLSInfo transport.TLSInfo
-
-	raftHandler *testutil.PauseableHandler
-	s           *etcdserver.EtcdServer
-	hss         []*httptest.Server
-}
-
-// mustNewMember return an inited member with the given name. If usePeerTLS is
-// true, it will set PeerTLSInfo and use https scheme to communicate between
-// peers.
-func mustNewMember(name string, usePeerTLS bool, addr string) *member {
-	var (
-		testTLSInfo = transport.TLSInfo{
-			KeyFile:        "./fixtures/server.key.insecure",
-			CertFile:       "./fixtures/server.crt",
-			TrustedCAFile:  "./fixtures/ca.crt",
-			ClientCertAuth: true,
-		}
-		err error
-	)
-	m := &member{}
-
-	peerScheme := "http"
-	if usePeerTLS {
-		peerScheme = "https"
-	}
-	var pln net.Listener
-	if addr == "" {
-		pln = newLocalListener()
-	} else {
-		pln = newListenerWithAddr(addr)
-	}
-	m.PeerListeners = []net.Listener{pln}
-	m.PeerURLs, err = types.NewURLs([]string{peerScheme + "://" + pln.Addr().String()})
-	if err != nil {
-		log.Fatal(err)
-	}
-	if usePeerTLS {
-		m.PeerTLSInfo = testTLSInfo
-	}
-
-	var cln net.Listener
-	if addr == "" {
-		cln = newLocalListener()
-	} else {
-		cln = newListenerWithAddr(addr)
-	}
-	m.ClientListeners = []net.Listener{cln}
-	m.ClientURLs, err = types.NewURLs([]string{"http://" + cln.Addr().String()})
-	if err != nil {
-		//TODO new Logger t.Fatal(err)
-	}
-
-	m.Name = name
-
-	m.DataDir, err = ioutil.TempDir(os.TempDir(), "etcd")
-	if err != nil {
-		log.Fatal(err)
-	}
-	clusterStr := fmt.Sprintf("%s=%s://%s", name, peerScheme, pln.Addr().String())
-	m.InitialPeerURLsMap, err = types.NewURLsMap(clusterStr)
-	if err != nil {
-		log.Fatal(err)
-	}
-	m.InitialClusterToken = clusterName
-	m.NewCluster = true
-	m.ServerConfig.PeerTLSInfo = m.PeerTLSInfo
-	m.ElectionTicks = electionTicks
-	m.TickMs = uint(tickDuration / time.Millisecond)
-	return m
-}
-
-// Clone returns a member with the same server configuration. The returned
-// member will not set PeerListeners and ClientListeners.
-func (m *member) Clone() *member {
-	mm := &member{}
-	mm.ServerConfig = m.ServerConfig
-
-	var err error
-	clientURLStrs := m.ClientURLs.StringSlice()
-	mm.ClientURLs, err = types.NewURLs(clientURLStrs)
-	if err != nil {
-		// this should never fail
-		panic(err)
-	}
-	peerURLStrs := m.PeerURLs.StringSlice()
-	mm.PeerURLs, err = types.NewURLs(peerURLStrs)
-	if err != nil {
-		// this should never fail
-		panic(err)
-	}
-	clusterStr := m.InitialPeerURLsMap.String()
-	mm.InitialPeerURLsMap, err = types.NewURLsMap(clusterStr)
-	if err != nil {
-		// this should never fail
-		panic(err)
-	}
-	mm.InitialClusterToken = m.InitialClusterToken
-	mm.ElectionTicks = m.ElectionTicks
-	mm.PeerTLSInfo = m.PeerTLSInfo
-	return mm
-}
-
-// Launch starts a member based on ServerConfig, PeerListeners
-// and ClientListeners.
-func (m *member) Launch() error {
-	time.Sleep(100 * time.Millisecond)
-	var err error
-	if m.s, err = etcdserver.NewServer(&m.ServerConfig); err != nil {
-		return fmt.Errorf("failed to initialize the etcd server: %v", err)
-	}
-	m.s.SyncTicker = time.Tick(500 * time.Millisecond)
-	m.s.Start()
-
-	m.raftHandler = &testutil.PauseableHandler{Next: etcdhttp.NewPeerHandler(m.s.Cluster(), m.s.RaftHandler())}
-
-	for _, ln := range m.PeerListeners {
-		hs := &httptest.Server{
-			Listener: ln,
-			Config:   &http.Server{Handler: m.raftHandler},
-		}
-		if m.PeerTLSInfo.Empty() {
-			hs.Start()
-		} else {
-			hs.TLS, err = m.PeerTLSInfo.ServerConfig()
-			if err != nil {
-				return err
-			}
-			hs.StartTLS()
-		}
-		m.hss = append(m.hss, hs)
-	}
-	for _, ln := range m.ClientListeners {
-		hs := &httptest.Server{
-			Listener: ln,
-			Config:   &http.Server{Handler: etcdhttp.NewClientHandler(m.s, m.ServerConfig.ReqTimeout())},
-		}
-		hs.Start()
-		m.hss = append(m.hss, hs)
-	}
-	return nil
-}
-
-func (m *member) WaitOK() {
-	cc := mustNewHTTPClient([]string{m.URL()})
-	kapi := client.NewKeysAPI(cc)
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-		_, err := kapi.Get(ctx, "/", nil)
-		if err != nil {
-			time.Sleep(tickDuration)
-			continue
-		}
-		cancel()
-		break
-	}
-	for m.s.Leader() == 0 {
-		time.Sleep(tickDuration)
-	}
-}
-
-func (m *member) URL() string { return m.ClientURLs[0].String() }
-
-func (m *member) Pause() {
-	m.raftHandler.Pause()
-	m.s.PauseSending()
-}
-
-func (m *member) Resume() {
-	m.raftHandler.Resume()
-	m.s.ResumeSending()
-}
-
-// Stop stops the member, but the data dir of the member is preserved.
-func (m *member) Stop() {
-	m.s.Stop()
-	for _, hs := range m.hss {
-		hs.CloseClientConnections()
-		hs.Close()
-	}
-	m.hss = nil
-}
-
-// Start starts the member using the preserved data dir.
-func (m *member) Restart() error {
-	newPeerListeners := make([]net.Listener, 0)
-	for _, ln := range m.PeerListeners {
-		newPeerListeners = append(newPeerListeners, newListenerWithAddr(ln.Addr().String()))
-	}
-	m.PeerListeners = newPeerListeners
-	newClientListeners := make([]net.Listener, 0)
-	for _, ln := range m.ClientListeners {
-		newClientListeners = append(newClientListeners, newListenerWithAddr(ln.Addr().String()))
-	}
-	m.ClientListeners = newClientListeners
-	return m.Launch()
-}
-
-// Terminate stops the member and removes the data dir.
-func (m *member) Terminate(wipe_data bool) {
-	m.s.Stop()
-	for _, hs := range m.hss {
-		hs.CloseClientConnections()
-		hs.Close()
-	}
-	if err := os.RemoveAll(m.ServerConfig.DataDir); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func mustNewHTTPClient(eps []string) client.Client {
-	cfg := client.Config{Transport: mustNewTransport(transport.TLSInfo{}), Endpoints: eps}
-	c, err := client.New(cfg)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return c
-}
-
-func mustNewTransport(tlsInfo transport.TLSInfo) *http.Transport {
-	// tick in integration test is short, so 1s dial timeout could play well.
-	tr, err := transport.NewTimeoutTransport(tlsInfo, time.Second, rafthttp.ConnReadTimeout, rafthttp.ConnWriteTimeout)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return tr
-}
-
-type SortableMemberSliceByPeerURLs []client.Member
-
-func (p SortableMemberSliceByPeerURLs) Len() int { return len(p) }
-func (p SortableMemberSliceByPeerURLs) Less(i, j int) bool {
-	return p[i].PeerURLs[0] < p[j].PeerURLs[0]
-}
-func (p SortableMemberSliceByPeerURLs) Swap(i, j int) { p[i], p[j] = p[j], p[i] }
