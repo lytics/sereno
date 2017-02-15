@@ -2,7 +2,8 @@ language: go
 script:  ./scripts/run-tests.sh
 sudo: false
 go:
-  - 1.6
+  - 1.6.4
+  - 1.7.5
   - tip
 matrix:
   allow_failures:
